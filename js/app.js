@@ -464,7 +464,7 @@ function renderStops() {
           <button data-act="plus" title="One night more">+</button>
         </span>
         <label class="arriveby" title="Deadline: warn me if the route arrives later than this">
-          by <input type="date" data-act="arriveby" value="${stop.arriveBy ?? ""}" />
+          <span class="arriveby-label">by</span> <input type="date" data-act="arriveby" title="Arrive-by deadline" value="${stop.arriveBy ?? ""}" />
         </label>
         <span class="stop-actions">
           <button class="icon-btn" data-act="explore" title="Hostels, food & things to do">🔍</button>
@@ -1033,6 +1033,25 @@ function initEvents() {
   $("#btn-print").addEventListener("click", () => {
     window.print();
   });
+
+  // mobile bottom nav — swaps which pane is visible; map/itinerary reuse the
+  // existing view-tab switching (invalidateSize is handled by the map's
+  // ResizeObserver when its container becomes visible)
+  document.querySelectorAll("#mobile-nav button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#mobile-nav button").forEach((b) =>
+        b.classList.toggle("active", b === btn));
+      const v = btn.dataset.mview;
+      document.body.classList.remove("m-stops", "m-map", "m-itinerary");
+      document.body.classList.add("m-" + v);
+      if (v === "map" || v === "itinerary") {
+        const tab = document.querySelector(`.view-tab[data-view="${v}"]`);
+        if (tab) tab.click();
+      }
+      closeExplore();
+    });
+  });
+  document.body.classList.add("m-stops");
 
   $("#explore-close").addEventListener("click", closeExplore);
   document.querySelectorAll(".explore-tab").forEach((tab) =>

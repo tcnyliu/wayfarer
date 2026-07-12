@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f766e" />
   <title>Wayfarer — Trip Planner</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧭</text></svg>" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -84,25 +85,33 @@
         <div id="itinerary" class="itinerary"></div>
       </div>
 
-      <!-- ============ EXPLORE DRAWER ============ -->
-      <div id="explore" class="explore hidden">
-        <div class="explore-head">
-          <div>
-            <h2 id="explore-title">City</h2>
-            <p id="explore-sub" class="explore-sub"></p>
-          </div>
-          <button id="explore-close" class="icon-btn" title="Close">✕</button>
-        </div>
-        <div class="explore-links" id="explore-links"></div>
-        <nav class="explore-tabs">
-          <button class="explore-tab active" data-tab="hostels">🛏 Hostels</button>
-          <button class="explore-tab" data-tab="food">🍴 Food &amp; drink</button>
-          <button class="explore-tab" data-tab="activities">🎟 Things to do</button>
-        </nav>
-        <div id="explore-body" class="explore-body"></div>
-      </div>
     </main>
   </div>
+
+  <!-- ============ EXPLORE DRAWER (body-level so it can overlay any view) ============ -->
+  <div id="explore" class="explore hidden">
+    <div class="explore-head">
+      <div>
+        <h2 id="explore-title">City</h2>
+        <p id="explore-sub" class="explore-sub"></p>
+      </div>
+      <button id="explore-close" class="icon-btn" title="Close">✕</button>
+    </div>
+    <div class="explore-links" id="explore-links"></div>
+    <nav class="explore-tabs">
+      <button class="explore-tab active" data-tab="hostels">🛏 Hostels</button>
+      <button class="explore-tab" data-tab="food">🍴 Food &amp; drink</button>
+      <button class="explore-tab" data-tab="activities">🎟 Things to do</button>
+    </nav>
+    <div id="explore-body" class="explore-body"></div>
+  </div>
+
+  <!-- ============ MOBILE BOTTOM NAV ============ -->
+  <nav id="mobile-nav" class="mobile-nav">
+    <button data-mview="stops" class="active">🧭<span>Stops</span></button>
+    <button data-mview="map">🗺️<span>Map</span></button>
+    <button data-mview="itinerary">📅<span>Itinerary</span></button>
+  </nav>
 
   <div id="toast" class="toast hidden"></div>
 
