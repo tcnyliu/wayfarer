@@ -1,0 +1,6 @@
+# personal itinerary — never publish
+js/trip.local.js
+
+# local tooling / OS noise
+.claude/
+.DS_Store
