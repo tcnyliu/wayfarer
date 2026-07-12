@@ -45,6 +45,9 @@ body {
 #app {
   display: grid;
   grid-template-columns: 384px 1fr;
+  /* one row pinned to the viewport — children scroll internally,
+     otherwise a long itinerary grows the row and nothing can scroll */
+  grid-template-rows: 100%;
   height: 100vh;
   overflow: hidden;
 }
@@ -226,7 +229,8 @@ input, select { font-family: inherit; }
 
 .stop-card:hover { box-shadow: var(--shadow-sm); border-color: var(--ink-300); }
 .stop-card.dragging { opacity: 0.4; }
-.stop-card.drag-over { border-top: 2px solid var(--accent); }
+.stop-card.drag-over-top { box-shadow: 0 -3px 0 0 var(--accent); }
+.stop-card.drag-over-bottom { box-shadow: 0 3px 0 0 var(--accent); }
 .stop-card.selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 
 .stop-row1 {
@@ -337,6 +341,8 @@ input, select { font-family: inherit; }
 }
 .icon-btn:hover { background: var(--line-soft); color: var(--ink-700); }
 .icon-btn.danger:hover { background: var(--red-soft); color: var(--red); }
+.icon-btn:disabled { opacity: 0.25; pointer-events: none; }
+.icon-btn.mini { width: 18px; height: 20px; font-size: 9px; }
 
 .stop-badges { display: flex; gap: 6px; margin-top: 7px; padding-left: 31px; flex-wrap: wrap; }
 
@@ -356,7 +362,7 @@ input, select { font-family: inherit; }
 /* --- leg connector --- */
 .leg {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 8px;
   padding: 3px 0 3px 24px;
   margin-bottom: 4px;
@@ -372,11 +378,26 @@ input, select { font-family: inherit; }
   margin-right: 6px;
 }
 
+.leg-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 2px 0; }
+.leg-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .leg-mode { font-size: 13px; }
 .leg-info b { color: var(--ink-700); font-weight: 600; }
 .leg a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .leg a:hover { text-decoration: underline; }
 .leg .leg-warn { color: var(--amber); font-weight: 600; }
+
+.leg-select {
+  align-self: flex-start;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink-700);
+  font-size: 11px;
+  padding: 2.5px 4px;
+}
+.leg-select:hover { border-color: var(--ink-300); }
+.leg-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
 
 /* --- sidebar footer --- */
 .sb-footer {
@@ -426,6 +447,7 @@ input, select { font-family: inherit; }
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 .view-tabs {
@@ -454,7 +476,8 @@ input, select { font-family: inherit; }
   margin-left: auto;
   margin-right: 12px;
   display: flex;
-  gap: 18px;
+  flex-wrap: wrap;
+  gap: 6px 18px;
   font-size: 12.5px;
   color: var(--ink-500);
 }
@@ -462,6 +485,8 @@ input, select { font-family: inherit; }
 
 .view { display: none; flex: 1; min-height: 0; position: relative; }
 .view.active { display: block; }
+
+#view-itinerary.active { overflow-y: auto; }
 
 #map { position: absolute; inset: 0; background: #dde5e9; }
 
@@ -605,6 +630,7 @@ input, select { font-family: inherit; }
 .itin-leg b { color: var(--ink-700); }
 .itin-leg a { color: var(--accent); font-weight: 600; text-decoration: none; }
 .itin-leg a:hover { text-decoration: underline; }
+.itin-alt { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-400); }
 
 /* ============ Explore drawer ============ */
 .explore {
@@ -724,6 +750,9 @@ input, select { font-family: inherit; }
   bottom: 22px;
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
   background: var(--ink-900);
   color: #fff;
   font-size: 13px;
@@ -734,6 +763,17 @@ input, select { font-family: inherit; }
   z-index: 2000;
   transition: opacity 0.25s, transform 0.25s;
 }
+
+.toast-action {
+  border: none;
+  background: rgba(255, 255, 255, 0.14);
+  color: #7ee0d6;
+  font-weight: 700;
+  font-size: 12.5px;
+  padding: 4px 12px;
+  border-radius: 7px;
+}
+.toast-action:hover { background: rgba(255, 255, 255, 0.24); }
 .toast.hidden { opacity: 0; transform: translateX(-50%) translateY(8px); pointer-events: none; }
 
 .hidden { display: none !important; }

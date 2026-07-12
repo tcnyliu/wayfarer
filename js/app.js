@@ -21,6 +21,8 @@ let exploreTab = "hostels";
 let map = null;
 let mapLayer = null;
 let dragIndex = null;
+let dropTarget = null;
+let searchHl = -1;
 let lastBounds = null;
 let mapHadSize = false;
 const FIT_OPTS = { padding: [46, 46], maxZoom: 7, animate: false };
@@ -94,28 +96,87 @@ function hoursLabel(h) {
   return mm ? `${hh}h ${mm}m` : `${hh}h`;
 }
 
-function toast(msg) {
+function toast(msg, action) {
   const el = $("#toast");
   el.textContent = msg;
+  if (action) {
+    const btn = document.createElement("button");
+    btn.className = "toast-action";
+    btn.textContent = action.label;
+    btn.addEventListener("click", () => { el.classList.add("hidden"); action.fn(); });
+    el.appendChild(btn);
+  }
   el.classList.remove("hidden");
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => el.classList.add("hidden"), 2600);
+  toast._t = setTimeout(() => el.classList.add("hidden"), action ? 6000 : 2600);
 }
 
 /* ---------------- travel estimation ---------------- */
 
 const MODE_ICON = { train: "🚆", bus: "🚌", flight: "✈️", "train+bus": "🚆🚌" };
+const MODE_META = {
+  train: { label: "Train" },
+  bus: { label: "Bus" },
+  flight: { label: "Flight" },
+  "train+bus": { label: "Train + bus" },
+};
 
+// Door-to-door duration heuristics: rail ~95 km/h incl. transfers, coach
+// ~72 km/h, flights add ~2.8h of airport overhead on top of air time.
+function modeHours(mode, km) {
+  if (mode === "flight") return km / 700 + 2.8;
+  if (mode === "bus") return km / 72 + 0.5;
+  return km / 95 + 0.6;
+}
+
+// Rough budget fares in EUR, booked a few weeks ahead (planning numbers,
+// not quotes): trains ~€0.11/km, coaches ~€0.055/km, budget flights
+// ~€30 base + distance (bags not included).
+function modeCost(mode, km) {
+  if (mode === "flight") return 30 + 0.05 * km;
+  if (mode === "bus") return 4 + 0.055 * km;
+  return 6 + 0.11 * km;
+}
+
+/**
+ * Estimate a leg across all viable modes.
+ * Returns { km, options, cheapest, fastest, recommended, chosen fields… }.
+ * a.legMode ("train"|"bus"|"flight"), if set, overrides the recommendation.
+ */
 function estimateLeg(a, b) {
   const km = haversineKm(a, b);
   const key = [normName(a.name), normName(b.name)].sort().join("|");
   const curated = CURATED_LEGS[key];
-  if (curated) return { km, ...curated, curated: true };
-  // Heuristic fallback: rail ~95 km/h door-to-door + transfer buffer;
-  // past ~900 km straight-line, flying wins in Europe.
-  if (km >= 900) return { km, hours: km / 700 + 2.8, mode: "flight", curated: false };
-  if (km < 90) return { km, hours: km / 60 + 0.4, mode: "bus", curated: false };
-  return { km, hours: km / 95 + 0.6, mode: "train", curated: false };
+
+  const options = {};
+  for (const m of ["train", "bus", "flight"]) {
+    if (m === "flight" && km < 400) continue; // short hops: flying never wins door-to-door
+    options[m] = { mode: m, hours: modeHours(m, km), cost: modeCost(m, km), curated: false, note: null };
+  }
+  if (curated) {
+    const cm = curated.mode === "train+bus" ? "train" : curated.mode;
+    if (!options[cm]) options[cm] = { mode: cm, cost: modeCost(cm, km), curated: false, note: null };
+    options[cm].hours = curated.hours;
+    options[cm].curated = true;
+    options[cm].note = curated.note;
+  }
+
+  const list = Object.values(options);
+  const cheapest = list.reduce((x, y) => (y.cost < x.cost ? y : x));
+  const fastest = list.reduce((x, y) => (y.hours < x.hours ? y : x));
+  // Recommended: the curated mode when we have real schedule data, otherwise
+  // best time/money trade-off valuing a backpacker's hour at ~€15.
+  const recommended = curated
+    ? options[curated.mode === "train+bus" ? "train" : curated.mode]
+    : list.reduce((x, y) => (y.hours * 15 + y.cost < x.hours * 15 + x.cost ? y : x));
+  const override = a.legMode && options[a.legMode] ? options[a.legMode] : null;
+  const chosen = override ?? recommended;
+
+  return {
+    km, options, cheapest, fastest, recommended,
+    mode: chosen.mode, hours: chosen.hours, cost: chosen.cost,
+    curated: chosen.curated, note: chosen.note, isAuto: !override,
+  };
 }
 
 function legBookingLink(a, b, mode) {
@@ -217,13 +278,17 @@ function optimizeRoute() {
     }
   }
 
+  const saved = before - bestCost;
+  if (saved <= 1) { toast("Route is already optimal"); return; }
+
+  const prevOrder = state.stops.slice();
   state.stops = best;
   saveTrip();
-  renderAll();
-  const saved = before - bestCost;
-  toast(saved > 1
-    ? `Route optimized — saved ~${Math.round(saved)} km`
-    : "Route is already optimal");
+  renderAll(true);
+  toast(`Route optimized — saved ~${Math.round(saved)} km`, {
+    label: "Undo",
+    fn: () => { state.stops = prevOrder; saveTrip(); renderAll(true); },
+  });
 }
 
 function autoBalanceNights() {
@@ -289,7 +354,7 @@ function initMap() {
   }).observe(el);
 }
 
-function renderMap() {
+function renderMap(fit = false) {
   if (!map) return;
   mapLayer.clearLayers();
   const { entries } = computeSchedule();
@@ -328,7 +393,8 @@ function renderMap() {
 
   const bounds = L.latLngBounds(entries.map((e) => [e.stop.lat, e.stop.lon]));
   lastBounds = bounds;
-  map.fitBounds(bounds, FIT_OPTS);
+  // only re-zoom when the route's shape changed — not on every nights tweak
+  if (fit || !mapHadSize) map.fitBounds(bounds, FIT_OPTS);
 }
 
 function panToStop(stop) {
@@ -337,6 +403,23 @@ function panToStop(stop) {
 }
 
 /* ---------------- sidebar render ---------------- */
+
+/**
+ * Move a stop from index `from` to sit at slot `insertAt` (an index in the
+ * pre-removal list; pass card-index for "before", card-index + 1 for "after").
+ * Handles the index shift caused by removing the dragged card first.
+ */
+function moveStop(from, insertAt) {
+  const stops = state.stops;
+  if (from < 0 || from >= stops.length) return;
+  let to = Math.max(0, Math.min(stops.length, insertAt));
+  if (from < to) to--;
+  if (to === from) return;
+  const [moved] = stops.splice(from, 1);
+  stops.splice(to, 0, moved);
+  saveTrip();
+  renderAll(true);
+}
 
 function renderStops() {
   const { entries } = computeSchedule();
@@ -348,7 +431,8 @@ function renderStops() {
     const isStart = index === 0, isEnd = index === entries.length - 1;
     card.className = "stop-card" + (isStart ? " is-start" : "") + (isEnd ? " is-end" : "") +
       (stop.id === selectedStopId ? " selected" : "");
-    card.draggable = true;
+    // draggable is armed on drag-handle mousedown (see initEvents) so text
+    // selection and the date input keep working inside the card
     card.dataset.index = index;
     card.dataset.id = stop.id;
 
@@ -369,6 +453,8 @@ function renderStops() {
         <span class="stop-num">${index + 1}</span>
         <span class="stop-name" title="${esc(stop.name)}${stop.country ? ", " + esc(stop.country) : ""}">${esc(stop.name)}</span>
         <span class="stop-dates">${dates}</span>
+        <button class="icon-btn mini" data-act="up" title="Move up" ${index === 0 ? "disabled" : ""}>▲</button>
+        <button class="icon-btn mini" data-act="down" title="Move down" ${isEnd ? "disabled" : ""}>▼</button>
         <button class="drag-handle" title="Drag to reorder">⠿</button>
       </div>
       <div class="stop-row2">
@@ -389,7 +475,7 @@ function renderStops() {
     `;
 
     card.addEventListener("click", (e) => {
-      if (e.target.closest("button") || e.target.closest("input")) return;
+      if (e.target.closest("button") || e.target.closest("input") || e.target.closest("select")) return;
       selectedStopId = stop.id;
       renderStops();
       panToStop(stop);
@@ -400,44 +486,64 @@ function renderStops() {
     card.querySelector('[data-act="plus"]').addEventListener("click", () => {
       stop.nights++; saveTrip(); renderAll();
     });
+    card.querySelector('[data-act="up"]').addEventListener("click", () => moveStop(index, index - 1));
+    card.querySelector('[data-act="down"]').addEventListener("click", () => moveStop(index, index + 2));
     card.querySelector('[data-act="arriveby"]').addEventListener("change", (e) => {
       stop.arriveBy = e.target.value || null; saveTrip(); renderAll();
     });
     card.querySelector('[data-act="remove"]').addEventListener("click", () => {
-      state.stops = state.stops.filter((s) => s.id !== stop.id);
-      saveTrip(); renderAll();
-      toast(`Removed ${stop.name}`);
+      const idx = state.stops.findIndex((s) => s.id === stop.id);
+      if (idx === -1) return;
+      state.stops.splice(idx, 1);
+      saveTrip(); renderAll(true);
+      toast(`Removed ${stop.name}`, {
+        label: "Undo",
+        fn: () => {
+          state.stops.splice(Math.min(idx, state.stops.length), 0, stop);
+          saveTrip(); renderAll(true);
+        },
+      });
     });
     card.querySelector('[data-act="explore"]').addEventListener("click", () => openExplore(stop.id));
-
-    card.addEventListener("dragstart", () => { dragIndex = index; card.classList.add("dragging"); });
-    card.addEventListener("dragend", () => { dragIndex = null; card.classList.remove("dragging"); });
-    card.addEventListener("dragover", (e) => { e.preventDefault(); card.classList.add("drag-over"); });
-    card.addEventListener("dragleave", () => card.classList.remove("drag-over"));
-    card.addEventListener("drop", (e) => {
-      e.preventDefault();
-      card.classList.remove("drag-over");
-      if (dragIndex === null || dragIndex === index) return;
-      const [moved] = state.stops.splice(dragIndex, 1);
-      state.stops.splice(index, 0, moved);
-      saveTrip(); renderAll();
-    });
 
     wrap.appendChild(card);
 
     if (leg) {
       const next = entries[index + 1].stop;
       const book = legBookingLink(stop, next, leg.mode);
+      const modeOption = (m) => {
+        const o = leg.options[m];
+        if (!o) return "";
+        const tags = [];
+        if (leg.cheapest.mode === m) tags.push("cheapest");
+        if (leg.fastest.mode === m) tags.push("fastest");
+        return `<option value="${m}" ${stop.legMode === m ? "selected" : ""}>` +
+          `${MODE_ICON[m]} ${MODE_META[m].label} · ${hoursLabel(o.hours)} · ~€${Math.round(o.cost)}` +
+          `${tags.length ? " · " + tags.join(" + ") : ""}</option>`;
+      };
       const legEl = document.createElement("div");
       legEl.className = "leg";
       legEl.innerHTML = `
         <span class="leg-line"></span>
-        <span class="leg-mode">${MODE_ICON[leg.mode] ?? "🚆"}</span>
-        <span class="leg-info"><b>${hoursLabel(leg.hours)}</b> · ${Math.round(leg.km)} km${leg.curated ? "" : " · est."}
-          ${leg.hours >= 8.5 ? ' <span class="leg-warn">long day</span>' : ""}
-          · <a href="${book.url}" target="_blank" rel="noopener">${book.label} ↗</a>
-        </span>`;
+        <div class="leg-body">
+          <div class="leg-top">
+            <span class="leg-mode">${MODE_ICON[leg.mode] ?? "🚆"}</span>
+            <span class="leg-info"><b>${hoursLabel(leg.hours)}</b> · ${Math.round(leg.km)} km · ~€${Math.round(leg.cost)}
+              ${leg.hours >= 8.5 ? ' <span class="leg-warn">long day</span>' : ""}
+              · <a href="${book.url}" target="_blank" rel="noopener">${book.label} ↗</a>
+            </span>
+          </div>
+          <select class="leg-select" title="Transport mode for this leg">
+            <option value="">Auto · ${MODE_META[leg.recommended.mode].label} (recommended)</option>
+            ${modeOption("train")}${modeOption("bus")}${modeOption("flight")}
+          </select>
+        </div>`;
       if (leg.note) legEl.title = leg.note;
+      legEl.querySelector(".leg-select").addEventListener("change", (e) => {
+        stop.legMode = e.target.value || null;
+        saveTrip();
+        renderAll();
+      });
       wrap.appendChild(legEl);
     }
   });
@@ -459,12 +565,13 @@ function renderNightsBudget() {
 
 function renderStats() {
   const { entries } = computeSchedule();
-  let km = 0, hours = 0;
-  entries.forEach((e) => { if (e.leg) { km += e.leg.km; hours += e.leg.hours; } });
+  let km = 0, hours = 0, cost = 0;
+  entries.forEach((e) => { if (e.leg) { km += e.leg.km; hours += e.leg.hours; cost += e.leg.cost; } });
   $("#trip-stats").innerHTML = entries.length
     ? `<span><b>${entries.length}</b> stops</span>
        <span><b>${Math.round(km).toLocaleString()}</b> km</span>
-       <span><b>${hoursLabel(hours)}</b> in transit</span>`
+       <span><b>${hoursLabel(hours)}</b> in transit</span>
+       <span title="Rough budget fares booked ahead — bags and city transit not included"><b>~€${Math.round(cost)}</b> transport</span>`
     : "";
 }
 
@@ -521,9 +628,19 @@ function renderItinerary() {
           ${leg ? (() => {
             const next = entries[index + 1].stop;
             const book = legBookingLink(stop, next, leg.mode);
+            const alts = ["train", "bus", "flight"]
+              .filter((m) => leg.options[m] && m !== leg.mode)
+              .map((m) => {
+                const o = leg.options[m];
+                const tags = [];
+                if (leg.cheapest.mode === m) tags.push("cheapest");
+                if (leg.fastest.mode === m) tags.push("fastest");
+                return `${MODE_ICON[m]} ${hoursLabel(o.hours)} · ~€${Math.round(o.cost)}${tags.length ? " (" + tags.join(", ") + ")" : ""}`;
+              }).join(" · ");
             return `<div class="itin-leg">${MODE_ICON[leg.mode] ?? "🚆"}
-              <span><b>${hoursLabel(leg.hours)}</b> · ${Math.round(leg.km)} km to ${esc(next.name)}${leg.note ? ` — ${esc(leg.note)}` : ""}
-              · <a href="${book.url}" target="_blank" rel="noopener">${book.label} ↗</a></span></div>`;
+              <span><b>${hoursLabel(leg.hours)}</b> · ${Math.round(leg.km)} km · ~€${Math.round(leg.cost)} to ${esc(next.name)}${leg.note ? ` — ${esc(leg.note)}` : ""}
+              · <a href="${book.url}" target="_blank" rel="noopener">${book.label} ↗</a>
+              ${alts ? `<span class="itin-alt">Other options: ${alts}</span>` : ""}</span></div>`;
           })() : ""}
         </div>
       </div>`;
@@ -715,6 +832,7 @@ async function runSearch(q) {
       return;
     }
     box.innerHTML = "";
+    searchHl = -1;
     results.forEach((r) => {
       const name = r.name || r.display_name.split(",")[0];
       const country = r.address?.country ?? "";
@@ -740,9 +858,8 @@ function addStop({ name, country, lat, lon }) {
   if (state.stops.length >= 2) state.stops.splice(state.stops.length - 1, 0, stop);
   else state.stops.push(stop);
   saveTrip();
-  renderAll();
-  toast(`Added ${name} (2 nights) — drag to reorder or hit Optimize`);
-  panToStop(stop);
+  renderAll(true);
+  toast(`Added ${name} (2 nights) — drag or ▲▼ to reorder, or hit Optimize`);
 }
 
 /* ---------------- import / export / reset ---------------- */
@@ -765,7 +882,7 @@ function importTrip(file) {
       if (!t || !Array.isArray(t.stops)) throw new Error("bad format");
       state = t;
       saveTrip();
-      renderAll();
+      renderAll(true);
       toast("Trip imported");
     } catch (e) { toast("Couldn't read that file — is it a Wayfarer export?"); }
   };
@@ -776,20 +893,87 @@ function resetTrip() {
   if (!confirm("Reset the trip to its starting state? Your current changes will be lost.")) return;
   state = seedTrip();
   saveTrip();
-  renderAll();
+  renderAll(true);
   toast("Trip reset");
 }
 
 /* ---------------- render all + init ---------------- */
 
-function renderAll() {
+function renderAll(fit = false) {
   $("#trip-start").value = state.startDate ?? "";
   $("#trip-end").value = state.endDate ?? "";
   renderStops();
   renderNightsBudget();
   renderStats();
-  renderMap();
+  renderMap(fit);
   renderItinerary();
+}
+
+function clearDropMarks() {
+  document.querySelectorAll(".drag-over-top, .drag-over-bottom")
+    .forEach((el) => el.classList.remove("drag-over-top", "drag-over-bottom"));
+}
+
+function endDrag() {
+  clearDropMarks();
+  document.querySelectorAll(".stop-card.dragging").forEach((el) => el.classList.remove("dragging"));
+  document.querySelectorAll('.stop-card[draggable="true"]').forEach((el) => (el.draggable = false));
+  dragIndex = null;
+  dropTarget = null;
+}
+
+function initDragReorder() {
+  const list = $("#stops-list");
+
+  // arm dragging only from the handle so inputs/text stay usable
+  list.addEventListener("mousedown", (e) => {
+    const handle = e.target.closest(".drag-handle");
+    if (handle) handle.closest(".stop-card").draggable = true;
+  });
+  document.addEventListener("mouseup", () => {
+    document.querySelectorAll('.stop-card[draggable="true"]').forEach((el) => (el.draggable = false));
+  });
+
+  list.addEventListener("dragstart", (e) => {
+    const card = e.target.closest(".stop-card");
+    if (!card) return;
+    dragIndex = Number(card.dataset.index);
+    card.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    try { e.dataTransfer.setData("text/plain", card.dataset.id); } catch (err) {}
+  });
+
+  list.addEventListener("dragover", (e) => {
+    if (dragIndex === null) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    clearDropMarks();
+    const card = e.target.closest(".stop-card");
+    if (card) {
+      // top half = insert before, bottom half = insert after — this is what
+      // makes dragging a stop into first/last position work reliably
+      const r = card.getBoundingClientRect();
+      const before = e.clientY - r.top < r.height / 2;
+      dropTarget = { index: Number(card.dataset.index), before };
+      card.classList.add(before ? "drag-over-top" : "drag-over-bottom");
+    } else {
+      const cards = list.querySelectorAll(".stop-card");
+      const last = cards[cards.length - 1];
+      if (!last) return;
+      dropTarget = { index: Number(last.dataset.index), before: false };
+      last.classList.add("drag-over-bottom");
+    }
+  });
+
+  list.addEventListener("drop", (e) => {
+    e.preventDefault();
+    if (dragIndex !== null && dropTarget) {
+      moveStop(dragIndex, dropTarget.index + (dropTarget.before ? 0 : 1));
+    }
+    endDrag();
+  });
+
+  list.addEventListener("dragend", endDrag);
 }
 
 function initEvents() {
@@ -802,9 +986,29 @@ function initEvents() {
     if (q.length < 2) { $("#search-results").classList.add("hidden"); return; }
     searchTimer = setTimeout(() => runSearch(q), 450);
   });
+  $("#place-search").addEventListener("keydown", (e) => {
+    const box = $("#search-results");
+    const items = [...box.querySelectorAll(".search-result")];
+    if (box.classList.contains("hidden") || !items.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      searchHl = e.key === "ArrowDown"
+        ? (searchHl + 1) % items.length
+        : (searchHl - 1 + items.length) % items.length;
+      items.forEach((el, i) => el.classList.toggle("hl", i === searchHl));
+      items[searchHl].scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      (items[searchHl] ?? items[0]).click();
+    } else if (e.key === "Escape") {
+      box.classList.add("hidden");
+    }
+  });
   document.addEventListener("click", (e) => {
     if (!e.target.closest(".search-wrap")) $("#search-results").classList.add("hidden");
   });
+
+  initDragReorder();
 
   $("#btn-optimize").addEventListener("click", optimizeRoute);
   $("#btn-balance").addEventListener("click", autoBalanceNights);
@@ -840,4 +1044,4 @@ window.WF = { openExplore, retryExplore: () => loadExplorePois() };
 
 initMap();
 initEvents();
-renderAll();
+renderAll(true);

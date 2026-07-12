@@ -20,11 +20,17 @@ object shaped like `DEFAULT_TRIP` in `js/data.js`.
 ## What it does
 
 - **Unlimited stops** — search any city, town, or landmark (OpenStreetMap
-  geocoding) and it drops into your route. Drag cards to reorder.
-- **Routing time** — every leg shows an estimated duration, distance, and
-  suggested mode (train / bus / flight). Well-known legs (e.g. Amsterdam →
-  Paris) use curated real-schedule times; everything else is estimated from
-  distance. Each leg links to Rome2Rio / Google Flights for booking.
+  geocoding) and it drops into your route. Reorder by dragging the ⠿ handle
+  (drop above/below any card, including first/last position) or with the
+  ▲▼ buttons. Enter adds the highlighted search result.
+- **Routing time & cost per mode** — every leg compares train / bus / flight
+  with door-to-door duration and a rough budget fare, tagging the cheapest
+  and fastest. "Auto" picks a sensible recommendation; override any leg with
+  its dropdown. Well-known legs (e.g. Amsterdam → Paris) use curated
+  real-schedule times; everything else is estimated from distance. Each leg
+  links to Rome2Rio / Google Flights for booking, and the header shows the
+  trip's total transport cost.
+- **Undo** — removing a stop and optimizing both offer one-click Undo.
 - **Route optimizer** — keeps your start and end fixed and reorders the middle
   to minimize distance, while treating your "arrive by" deadlines as hard
   constraints.
@@ -42,8 +48,9 @@ object shaped like `DEFAULT_TRIP` in `js/data.js`.
 
 ## Notes
 
-- Travel times are planning estimates — confirm exact schedules on
-  Omio/Trainline/airline sites when booking.
+- Travel times and fares are planning estimates (budget fares booked ahead;
+  flight times include ~3h of airport overhead) — confirm exact schedules and
+  prices on Omio/Trainline/airline sites when booking.
 - POI data comes from OpenStreetMap's free public APIs; results are cached for
   a week. Occasional slowness or misses are normal — the Hostelworld/Maps
   links always work.
